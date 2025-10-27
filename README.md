@@ -1,4 +1,6 @@
+<div align="center">
 <img src="assets/logo.png" alt="machsec logo" width="180">
+</div>
 
 # Pacropper
 

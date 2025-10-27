@@ -1,0 +1,22 @@
+# Rust build artifacts
+/target
+Cargo.lock
+
+# Demo binary
+/demo
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Test files
+test_*
+*.o
+poc_*
+exploit_demo.py
+
+# macOS
+.DS_Store
+
+# Debug
+.gdb_history

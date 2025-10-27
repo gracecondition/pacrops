@@ -2,11 +2,11 @@
 <img src="assets/logo.png" alt="machsec logo" width="180">
 </div>
 
-# Pacropper
+# pacrops
 
 **PAC-aware ROP Gadget Finder for ARM64 Binaries**
 
-Pacropper is a specialized tool for finding exploitable ROP gadgets in ARM64 binaries that use Pointer Authentication Codes (PAC). It identifies gadgets that are either unprotected by PAC or vulnerable to known PAC bypass techniques.
+pacrops is a specialized tool for finding exploitable ROP gadgets in ARM64 binaries that use Pointer Authentication Codes (PAC). It identifies gadgets that are either unprotected by PAC or vulnerable to known PAC bypass techniques.
 
 ## Features
 
@@ -137,15 +137,15 @@ Vulnerability Breakdown:
 
 ## Python Bindings
 
-Pacropper includes Python bindings for easy integration with exploit development workflows.
+pacrops includes Python bindings for easy integration with exploit development workflows.
 
 ### Quick Start
 
 ```python
-from pacrops import Pacropper, GadgetType
+from pacrops import pacrops, GadgetType
 
 # Analyze a binary
-p = Pacropper('./target/binary')
+p = pacrops('./target/binary')
 
 # Get statistics
 print(f"Found {p.pac_count} PAC instructions")
@@ -165,12 +165,12 @@ for gadget in unsigned[:5]:
 ```python
 #!/usr/bin/env python3
 from pwn import *
-from pacrops import Pacropper
+from pacrops import pacrops
 
 context.arch = 'aarch64'
 
 # Find gadgets
-p = Pacropper('./binary')
+p = pacrops('./binary')
 pop_x0 = p.pop_register('x0')[0]
 system = p.call_gadgets()[0]
 
@@ -191,9 +191,9 @@ io.interactive()
 
 ### Python API Reference
 
-#### `Pacropper(binary_path, pacrops_path=None, max_gadget_size=10)`
+#### `pacrops(binary_path, pacrops_path=None, max_gadget_size=10)`
 
-Initialize a Pacropper instance for analyzing a binary.
+Initialize a pacrops instance for analyzing a binary.
 
 **Properties:**
 - `gadgets` - List of all gadgets
@@ -228,7 +228,7 @@ python3 exploit_clean.py
 
 ## How It Works
 
-Pacropper analyzes ARM64 binaries by:
+pacrops analyzes ARM64 binaries by:
 
 1. **Disassembly**: Uses Capstone to disassemble executable sections
 2. **PAC Detection**: Identifies PAC instructions (PACIA*, RETAA, etc.)
@@ -272,7 +272,7 @@ Pointer Authentication Codes (PAC) is a security feature introduced in ARMv8.3-A
 - **PAC Bypass Techniques**: Key/modifier confusion attacks
 - **Implementation Flaws**: Replay attacks, context manipulation
 
-Pacropper helps security researchers and exploit developers identify these weaknesses.
+pacrops helps security researchers and exploit developers identify these weaknesses.
 
 ## Contributing
 
@@ -284,12 +284,12 @@ MIT License - see LICENSE file for details.
 
 ## Citation
 
-If you use Pacropper in your research, please cite:
+If you use pacrops in your research, please cite:
 
 ```bibtex
 @software{pacrops2025,
   author = {Your Name},
-  title = {Pacropper: PAC-aware ROP Gadget Finder for ARM64},
+  title = {pacrops: PAC-aware ROP Gadget Finder for ARM64},
   year = {2025},
   url = {https://github.com/yourusername/pacrops}
 }

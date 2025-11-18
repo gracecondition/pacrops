@@ -27,19 +27,47 @@ struct Args {
     #[arg(short = 's', long, default_value_t = 10)]
     max_size: usize,
 
-    /// Show only unsigned gadgets (no PAC protection)
+    // === PAC Vulnerability Type Filters ===
+    /// [CRITICAL] Show only Pre-Auth Load gadgets - loads PAC-signed pointers from data sections
+    /// (__auth_got, __auth_ptr, __const, __data) before br/blr/braa. Bypasses PAC by reusing
+    /// pre-authenticated function pointers stored at compile time.
+    #[arg(long)]
+    preauth_only: bool,
+
+    /// [CRITICAL] Show only unsigned gadgets - no PAC protection at all (no paciasp/autiasp/retaa)
     #[arg(long)]
     unsigned_only: bool,
 
-    /// Show only context manipulation gadgets (modifies LR before auth)
+    /// [CRITICAL] Show only unsigned indirect branches - br/blr without authentication
     #[arg(long)]
-    context_vuln: bool,
+    unsigned_indirect_only: bool,
 
-    /// Show only gadgets with zero modifier (replay vulnerable)
+    /// [CRITICAL] Show only stack pivot gadgets - modifies SP before autiasp/autibsp,
+    /// allowing attacker to control the context used for PAC verification
     #[arg(long)]
-    no_context: bool,
+    stack_pivot_only: bool,
 
-    /// Show only vulnerable gadgets (replay/context manipulation)
+    /// [HIGH] Show only context manipulation gadgets - modifies LR/x30 before authentication,
+    /// potentially allowing PAC bypass through context confusion
+    #[arg(long)]
+    context_only: bool,
+
+    /// [HIGH] Show only key confusion gadgets - signs with one key (A/B) but authenticates
+    /// with different key, breaking PAC's cryptographic guarantees
+    #[arg(long)]
+    key_confusion_only: bool,
+
+    /// [MEDIUM] Show only modifier confusion gadgets - signs with one modifier (SP/zero) but
+    /// authenticates with different modifier (e.g., paciasp + autiaz)
+    #[arg(long)]
+    modifier_confusion_only: bool,
+
+    /// [MEDIUM] Show only replay vulnerable gadgets - uses zero modifier (paciaz/autiaz),
+    /// making signatures replayable across different contexts
+    #[arg(long)]
+    replay_only: bool,
+
+    /// Show all vulnerable gadgets (any exploitable PAC weakness)
     #[arg(long)]
     vulnerable_only: bool,
 
@@ -156,11 +184,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .filter(|gadget| {
                 if args.show_all {
                     true
+                } else if args.preauth_only {
+                    gadget.gadget_type == GadgetType::PreAuthLoad
                 } else if args.unsigned_only {
                     gadget.gadget_type == GadgetType::Unsigned
-                } else if args.context_vuln {
+                } else if args.unsigned_indirect_only {
+                    gadget.gadget_type == GadgetType::UnsignedIndirect
+                } else if args.stack_pivot_only {
+                    gadget.gadget_type == GadgetType::StackPivot
+                } else if args.context_only {
                     gadget.gadget_type == GadgetType::ContextManipulation
-                } else if args.no_context {
+                } else if args.key_confusion_only {
+                    gadget.gadget_type == GadgetType::KeyConfusion
+                } else if args.modifier_confusion_only {
+                    gadget.gadget_type == GadgetType::ModifierConfusion
+                } else if args.replay_only {
                     gadget.gadget_type == GadgetType::ReplayVulnerable
                 } else if args.signed_only {
                     !gadget.pac_instructions.is_empty()
@@ -210,11 +248,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for gadget in &analyzed_gadgets {
             let should_print = if args.show_all {
                 true
+            } else if args.preauth_only {
+                gadget.gadget_type == GadgetType::PreAuthLoad
             } else if args.unsigned_only {
                 gadget.gadget_type == GadgetType::Unsigned
-            } else if args.context_vuln {
+            } else if args.unsigned_indirect_only {
+                gadget.gadget_type == GadgetType::UnsignedIndirect
+            } else if args.stack_pivot_only {
+                gadget.gadget_type == GadgetType::StackPivot
+            } else if args.context_only {
                 gadget.gadget_type == GadgetType::ContextManipulation
-            } else if args.no_context {
+            } else if args.key_confusion_only {
+                gadget.gadget_type == GadgetType::KeyConfusion
+            } else if args.modifier_confusion_only {
+                gadget.gadget_type == GadgetType::ModifierConfusion
+            } else if args.replay_only {
                 gadget.gadget_type == GadgetType::ReplayVulnerable
             } else if args.signed_only {
                 // Show gadgets with PAC protection (has PAC instructions)
@@ -263,12 +311,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Determine active filter for summary display
         let filter_mode = if args.show_all {
             "all"
+        } else if args.preauth_only {
+            "preauth_only"
         } else if args.unsigned_only {
             "unsigned"
-        } else if args.context_vuln {
-            "context_vuln"
-        } else if args.no_context {
-            "no_context"
+        } else if args.unsigned_indirect_only {
+            "unsigned_indirect"
+        } else if args.stack_pivot_only {
+            "stack_pivot"
+        } else if args.context_only {
+            "context_only"
+        } else if args.key_confusion_only {
+            "key_confusion"
+        } else if args.modifier_confusion_only {
+            "modifier_confusion"
+        } else if args.replay_only {
+            "replay_only"
         } else if args.signed_only {
             "signed"
         } else if args.vulnerable_only {

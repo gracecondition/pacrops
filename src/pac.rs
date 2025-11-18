@@ -31,11 +31,11 @@ fn find_data_section_loads(
         // Track adrp instructions: adrp x0, #0x100000000
         if mnemonic == "adrp" {
             if let Some(dest_reg) = extract_register(op_str) {
-                // adrp computes: (PC & ~0xfff) + (imm << 12)
+                // Capstone gives us the absolute page address directly (already computed)
                 let parts: Vec<&str> = op_str.split(',').collect();
                 if parts.len() >= 2 {
-                    if let Some(imm) = parse_offset(parts[1].trim()) {
-                        let page_addr = (*addr & !0xfff) + ((imm << 12) as u64);
+                    if let Some(page_addr) = parse_offset(parts[1].trim()) {
+                        let page_addr = page_addr as u64;
                         reg_values.insert(dest_reg, page_addr);
                     }
                 }
@@ -52,7 +52,8 @@ fn find_data_section_loads(
                 // Only track if adding to itself or we already track the source
                 if let Some(&base_val) = reg_values.get(src_reg) {
                     if let Some(offset) = parse_offset(parts[2].trim()) {
-                        reg_values.insert(dest_reg.to_string(), (base_val as i64 + offset) as u64);
+                        let final_addr = (base_val as i64 + offset) as u64;
+                        reg_values.insert(dest_reg.to_string(), final_addr);
                     }
                 }
             }
@@ -265,32 +266,47 @@ pub fn detect_pac_vulnerabilities(
         }
     }
 
-    // Check for unsigned indirect branches AND pre-authenticated loads
-    let mut has_br_blr = false;
-    let mut br_blr_register = None;
+    // Check for indirect branches (both unsigned and authenticated) AND pre-authenticated loads
+    let mut has_indirect_branch = false;
+    let mut branch_register = None;
+    let mut is_authenticated = false;
 
     for (_, mnemonic, op_str) in gadget_insns {
         if mnemonic == "br" || mnemonic == "blr" {
-            has_br_blr = true;
+            has_indirect_branch = true;
+            is_authenticated = false;
             // Extract the register being branched to (e.g., "x0" from "br x0")
-            br_blr_register = op_str.split(',').next().map(|s| s.trim().to_string());
+            branch_register = op_str.split(',').next().map(|s| s.trim().to_string());
+            break;
+        } else if mnemonic == "braa" || mnemonic == "brab" || mnemonic == "blraa" || mnemonic == "blrab" ||
+                  mnemonic == "braaz" || mnemonic == "brabz" || mnemonic == "blraaz" || mnemonic == "blrabz" {
+            has_indirect_branch = true;
+            is_authenticated = true;
+            // Extract the register being branched to (e.g., "x0" from "braa x0, x1")
+            branch_register = op_str.split(',').next().map(|s| s.trim().to_string());
             break;
         }
     }
 
-    if has_br_blr {
-        // Check if the br/blr register is loaded from a data section
-        if let Some(ref target_reg) = br_blr_register {
+    if has_indirect_branch {
+        // Check if the branch register is loaded from a data section
+        if let Some(ref target_reg) = branch_register {
             if let Some((load_addr, section_name)) = find_data_section_loads(gadget_insns, target_reg, data_sections) {
                 notes.push(format!("Loads from {} (likely PAC-signed pointer)", section_name));
                 notes.push(format!("Address: 0x{:x}", load_addr));
+                if is_authenticated {
+                    notes.push("Uses authenticated branch but pointer is pre-signed".to_string());
+                }
                 return GadgetType::PreAuthLoad;
             }
         }
 
-        // If no pre-auth load detected, it's just unsigned indirect
-        notes.push("Unsigned indirect branch - no PAC check".to_string());
-        return GadgetType::UnsignedIndirect;
+        // If no pre-auth load detected
+        if !is_authenticated {
+            notes.push("Unsigned indirect branch - no PAC check".to_string());
+            return GadgetType::UnsignedIndirect;
+        }
+        // If authenticated branch without pre-auth load, fall through to other checks
     }
 
     // Check for stack pivot (SP manipulation before auth)

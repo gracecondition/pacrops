@@ -22,6 +22,7 @@ class GadgetType:
     """Gadget vulnerability types"""
     UNSIGNED = "Unsigned"
     UNSIGNED_INDIRECT = "UnsignedIndirect"
+    PRE_AUTH_LOAD = "PreAuthLoad"
     REPLAY_VULNERABLE = "ReplayVulnerable"
     CONTEXT_MANIPULATION = "ContextManipulation"
     KEY_CONFUSION = "KeyConfusion"

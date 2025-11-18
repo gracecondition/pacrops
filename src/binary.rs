@@ -3,6 +3,7 @@ use std::fs;
 
 pub struct BinaryInfo {
     pub sections: Vec<(Vec<u8>, u64, String)>,  // (code, addr, name)
+    pub data_sections: Vec<(u64, u64, String)>,  // (start_addr, end_addr, name) for data sections
     pub has_pac_header: bool,
     #[allow(dead_code)]
     pub is_arm64e: bool,
@@ -86,16 +87,29 @@ pub fn load_binary(path: &str) -> Result<BinaryInfo, Box<dyn std::error::Error>>
         }
     }
 
-    // Collect all executable sections
+    // Collect all executable sections and data sections
     let mut sections = Vec::new();
+    let mut data_sections = Vec::new();
+
     for section in obj.sections() {
         if let Ok(name) = section.name() {
-            // Only include executable sections (typically __text, __stubs, __stub_helper, etc.)
+            // Collect executable sections (typically __text, __stubs, __stub_helper, etc.)
             if name.starts_with("__text") || name.starts_with("__stub") || name.starts_with("__auth_stub") {
                 if let Ok(data) = section.data() {
                     let addr = section.address();
                     sections.push((data.to_vec(), addr, name.to_string()));
                 }
+            }
+            // Collect data sections that may contain PAC-signed pointers
+            else if name.starts_with("__const") ||
+                    name.starts_with("__data") ||
+                    name.starts_with("__rodata") ||
+                    name.starts_with("__auth_got") ||
+                    name.starts_with("__auth_ptr") ||
+                    name.starts_with("__got") {
+                let addr = section.address();
+                let size = section.size();
+                data_sections.push((addr, addr + size, name.to_string()));
             }
         }
     }
@@ -106,6 +120,7 @@ pub fn load_binary(path: &str) -> Result<BinaryInfo, Box<dyn std::error::Error>>
 
     Ok(BinaryInfo {
         sections,
+        data_sections,
         has_pac_header,
         is_arm64e,
     })

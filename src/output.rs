@@ -15,6 +15,7 @@ pub struct JsonOutput {
 pub struct Statistics {
     pub unsigned: usize,
     pub unsigned_indirect: usize,
+    pub pre_auth_load: usize,
     pub key_confusion: usize,
     pub modifier_confusion: usize,
     pub replay_vulnerable: usize,
@@ -31,6 +32,7 @@ pub fn format_gadget_type(gadget_type: &GadgetType) -> (&str, &str) {
         GadgetType::KeyConfusion => ("KEY-CONFUSION", "\x1b[91m"),  // Red
         GadgetType::ModifierConfusion => ("MODIFIER-VULN", "\x1b[93m"),  // Yellow
         GadgetType::UnsignedIndirect => ("UNSIGNED-BR", "\x1b[91m"),  // Red
+        GadgetType::PreAuthLoad => ("PREAUTH-LOAD", "\x1b[91m"),  // Red - Critical!
         GadgetType::StackPivot => ("STACK-PIVOT", "\x1b[91m"),  // Red
         GadgetType::PacSafe => ("PAC-SAFE", "\x1b[92m"),  // Green
     }
@@ -72,6 +74,7 @@ pub fn print_summary(
     total: usize,
     unsigned: usize,
     unsigned_indirect: usize,
+    pre_auth_load: usize,
     key_confusion: usize,
     modifier_confusion: usize,
     replay_vuln: usize,
@@ -104,7 +107,7 @@ pub fn print_summary(
     println!();
 
     // Calculate exploitable count
-    let exploitable = unsigned + unsigned_indirect + key_confusion + modifier_confusion + replay_vuln + context_vuln + stack_pivot;
+    let exploitable = unsigned + unsigned_indirect + pre_auth_load + key_confusion + modifier_confusion + replay_vuln + context_vuln + stack_pivot;
     let exploit_percent = if total > 0 { (exploitable * 100) / total } else { 0 };
 
     println!("  {bold}Total gadgets:{reset}       {}", total, bold=bold, reset=reset);
@@ -134,6 +137,7 @@ pub fn print_summary(
             println!("    {dim}└─{reset} {red}Unsigned indirect (br/blr):{reset}  {}", unsigned_indirect, dim=dim, reset=reset, red=red);
             println!();
             println!("  {bold}Full Vulnerability Breakdown:{reset} {dim}(use --show-all to see all){reset}", bold=bold, reset=reset, dim=dim);
+            println!("    {dim}├─{reset} {red}Pre-auth load (data section):{reset} {}", pre_auth_load, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {red}Key confusion:{reset}                {}", key_confusion, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {yellow}Modifier confusion:{reset}           {}", modifier_confusion, dim=dim, reset=reset, yellow=yellow);
             println!("    {dim}├─{reset} {yellow}Replay vulnerable:{reset}            {}", replay_vuln, dim=dim, reset=reset, yellow=yellow);
@@ -166,6 +170,7 @@ pub fn print_summary(
             println!("  {bold}Displayed Counts:{reset}", bold=bold, reset=reset);
             println!("    {dim}├─{reset} {red}Unsigned (no PAC):{reset}           {}", unsigned, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {red}Unsigned indirect (br/blr):{reset}  {}", unsigned_indirect, dim=dim, reset=reset, red=red);
+            println!("    {dim}├─{reset} {red}Pre-auth load (data section):{reset} {}", pre_auth_load, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {red}Key confusion:{reset}                {}", key_confusion, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {yellow}Modifier confusion:{reset}           {}", modifier_confusion, dim=dim, reset=reset, yellow=yellow);
             println!("    {dim}├─{reset} {yellow}Replay vulnerable:{reset}            {}", replay_vuln, dim=dim, reset=reset, yellow=yellow);
@@ -178,6 +183,7 @@ pub fn print_summary(
             println!("  {bold}Full Vulnerability Breakdown:{reset}", bold=bold, reset=reset);
             println!("    {dim}├─{reset} {red}Unsigned (no PAC):{reset}           {}", unsigned, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {red}Unsigned indirect (br/blr):{reset}  {}", unsigned_indirect, dim=dim, reset=reset, red=red);
+            println!("    {dim}├─{reset} {red}Pre-auth load (data section):{reset} {}", pre_auth_load, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {red}Key confusion:{reset}                {}", key_confusion, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {yellow}Modifier confusion:{reset}           {}", modifier_confusion, dim=dim, reset=reset, yellow=yellow);
             println!("    {dim}├─{reset} {yellow}Replay vulnerable:{reset}            {}", replay_vuln, dim=dim, reset=reset, yellow=yellow);
@@ -190,6 +196,7 @@ pub fn print_summary(
             println!("  {bold}Vulnerability Breakdown:{reset}", bold=bold, reset=reset);
             println!("    {dim}├─{reset} {red}Unsigned (no PAC):{reset}           {}", unsigned, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {red}Unsigned indirect (br/blr):{reset}  {}", unsigned_indirect, dim=dim, reset=reset, red=red);
+            println!("    {dim}├─{reset} {red}Pre-auth load (data section):{reset} {}", pre_auth_load, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {red}Key confusion:{reset}                {}", key_confusion, dim=dim, reset=reset, red=red);
             println!("    {dim}├─{reset} {yellow}Modifier confusion:{reset}           {}", modifier_confusion, dim=dim, reset=reset, yellow=yellow);
             println!("    {dim}├─{reset} {yellow}Replay vulnerable:{reset}            {}", replay_vuln, dim=dim, reset=reset, yellow=yellow);
@@ -214,6 +221,7 @@ pub fn output_json(
     gadgets: &[Gadget],
     unsigned: usize,
     unsigned_indirect: usize,
+    pre_auth_load: usize,
     key_confusion: usize,
     modifier_confusion: usize,
     replay_vuln: usize,
@@ -221,7 +229,7 @@ pub fn output_json(
     stack_pivot: usize,
     pac_safe: usize,
 ) {
-    let exploitable = unsigned + unsigned_indirect + key_confusion + modifier_confusion + replay_vuln + context_vuln + stack_pivot;
+    let exploitable = unsigned + unsigned_indirect + pre_auth_load + key_confusion + modifier_confusion + replay_vuln + context_vuln + stack_pivot;
 
     let output = JsonOutput {
         binary: binary_name.to_string(),
@@ -231,6 +239,7 @@ pub fn output_json(
         statistics: Statistics {
             unsigned,
             unsigned_indirect,
+            pre_auth_load,
             key_confusion,
             modifier_confusion,
             replay_vulnerable: replay_vuln,

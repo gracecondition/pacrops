@@ -22,6 +22,7 @@ pacrops is a specialized tool for finding exploitable ROP gadgets in ARM64 binar
 |-------|-------------|----------------|----------|
 | **Unsigned** | No PAC protection at all | Direct | 🔴 Critical |
 | **Unsigned Indirect** | `br`/`blr` without PAC | Direct | 🔴 Critical |
+| **Pre-Auth Load** | Loads PAC-signed pointer from data section before `br`/`blr` | Direct | 🔴 Critical |
 | **Key Confusion** | Sign with key A, auth with key B | Direct | 🔴 Critical |
 | **Modifier Confusion** | Different modifiers for sign/auth | Requires additional primitives | 🟡 High |
 | **Replay Vulnerable** | Uses zero modifier like `paciaz` (predictable PAC) | Requires additional primitives | 🟡 High |
@@ -35,7 +36,16 @@ pacrops is a specialized tool for finding exploitable ROP gadgets in ARM64 binar
 - **Requires additional primitives**: Needs memory leaks, PAC oracle, or other info leak vulnerabilities
 - **Very difficult**: Would require breaking PAC itself or finding implementation flaws
 
-**Note**: Context Manipulation gadgets are classified conservatively. While they load the return address from the stack before authentication, an attacker would still need:
+**Important Notes**:
+
+**Pre-Auth Load** gadgets are particularly dangerous because they bypass PAC entirely:
+- ARM64 binaries store function pointers, vtables, and callbacks in data sections (`__const`, `__data`, `__auth_got`, etc.)
+- These pointers are often signed with PAC at compile time and stored pre-authenticated
+- A gadget that loads from these sections and then branches has access to valid, signed pointers
+- No PAC forgery needed - the attacker just reuses existing authenticated pointers
+- Example: `ldr x0, [pc, #0x1000] ; blr x0` where 0x1000 points to `__auth_got`
+
+**Context Manipulation** gadgets are classified conservatively. While they load the return address from the stack before authentication, an attacker would still need:
 1. A valid PAC for the target address (via memory leak), or
 2. A PAC oracle to brute force valid pointers, or
 3. Another vulnerability to bypass PAC entirely
@@ -123,14 +133,15 @@ Total ROP gadgets: 70
 Exploitable:       50 / 70 (71%)
 
 Vulnerability Breakdown:
-  ├─ Unsigned (no PAC):        22
-  ├─ Unsigned indirect (br/blr): 28
-  ├─ Key confusion:             0
-  ├─ Modifier confusion:        0
-  ├─ Replay vulnerable:         0
-  ├─ Context manipulation:      0
-  ├─ Stack pivot:               0
-  └─ PAC-safe:                  20
+  ├─ Unsigned (no PAC):              22
+  ├─ Unsigned indirect (br/blr):     28
+  ├─ Pre-auth load (data section):    0
+  ├─ Key confusion:                   0
+  ├─ Modifier confusion:              0
+  ├─ Replay vulnerable:               0
+  ├─ Context manipulation:            0
+  ├─ Stack pivot:                     0
+  └─ PAC-safe:                       20
 
 ⚠️  Exploitable gadgets: 50
 ```
@@ -258,19 +269,40 @@ PacInstruction::PacIASP => {
 }
 ```
 
-#### 2. **Unsigned Indirect Branch Detection** (Priority 1)
+#### 2. **Unsigned Indirect Branch & Pre-Auth Load Detection** (Priority 1)
 
-Immediately checked before other analyses. Any gadget containing `br` or `blr` without PAC authentication is flagged as critically vulnerable:
+Immediately checked before other analyses. The engine first looks for `br`/`blr` instructions, then determines if they load from data sections containing PAC-signed pointers:
 
 ```rust
-for (_, mnemonic, _) in gadget_insns {
-    if mnemonic == "br" || mnemonic == "blr" {
-        return GadgetType::UnsignedIndirect;  // Exit immediately
+// First, check for br/blr and identify the target register
+if mnemonic == "br" || mnemonic == "blr" {
+    br_blr_register = extract_register(op_str);  // e.g., "x0" from "br x0"
+}
+
+// Then check if that register is loaded from a data section
+if mnemonic.starts_with("ldr") && targets_br_register {
+    if let Some(load_addr) = parse_load_address(op_str, insn_addr) {
+        // Check if address falls in __const, __data, __auth_got, etc.
+        for (start, end, section_name) in data_sections {
+            if load_addr >= start && load_addr < end {
+                return GadgetType::PreAuthLoad;  // Uses pre-authenticated pointers!
+            }
+        }
     }
 }
+
+// If br/blr but no data section load detected
+return GadgetType::UnsignedIndirect;
 ```
 
-**Why it's critical:** `br`/`blr` instructions perform indirect jumps to addresses in registers. Without PAC authentication, an attacker can control these registers to jump anywhere.
+**Why Pre-Auth Load is critical:**
+- ARM64 binaries store pre-signed function pointers in data sections (`__const`, `__auth_got`, `__auth_ptr`)
+- These pointers were signed at compile/link time and are already authenticated
+- A gadget like `ldr x0, [pc, #0x1000] ; blr x0` can load and use these valid pointers
+- No PAC forgery needed - the attacker reuses legitimate authenticated pointers to call arbitrary functions
+- Completely bypasses PAC protection by design
+
+**Why Unsigned Indirect is critical:** `br`/`blr` instructions perform indirect jumps to addresses in registers. Without PAC authentication, an attacker can control these registers to jump anywhere.
 
 #### 3. **Stack Pivot Detection** (Priority 2)
 

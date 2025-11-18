@@ -2,7 +2,16 @@ use crate::types::Gadget;
 use crate::pac::{detect_pac_instruction, detect_pac_vulnerabilities};
 
 pub fn is_control_flow_instruction(mnemonic: &str) -> bool {
-    matches!(mnemonic, "ret" | "br" | "blr" | "retaa" | "retab")
+    matches!(mnemonic,
+        // Unsigned control flow
+        "ret" | "br" | "blr" |
+        // PAC-authenticated returns
+        "retaa" | "retab" | "eretaa" | "eretab" |
+        // PAC-authenticated branches (register modifier)
+        "braa" | "brab" | "blraa" | "blrab" |
+        // PAC-authenticated branches (zero modifier)
+        "braaz" | "brabz" | "blraaz" | "blrabz"
+    )
 }
 
 pub fn find_gadgets(instructions: &capstone::Instructions, max_gadget_size: usize) -> Vec<Vec<(u64, String, String)>> {
@@ -29,7 +38,7 @@ pub fn find_gadgets(instructions: &capstone::Instructions, max_gadget_size: usiz
     gadgets
 }
 
-pub fn analyze_gadget(gadget_insns: &[(u64, String, String)]) -> Gadget {
+pub fn analyze_gadget(gadget_insns: &[(u64, String, String)], data_sections: &[(u64, u64, String)]) -> Gadget {
     let mut pac_instructions = Vec::new();
     let mut instructions = Vec::new();
     let mut vulnerability_notes = Vec::new();
@@ -45,7 +54,7 @@ pub fn analyze_gadget(gadget_insns: &[(u64, String, String)]) -> Gadget {
     }
 
     // Always run full vulnerability detection to check for br/blr and other patterns
-    let gadget_type = detect_pac_vulnerabilities(&pac_instructions, &gadget_insns, &mut vulnerability_notes);
+    let gadget_type = detect_pac_vulnerabilities(&pac_instructions, &gadget_insns, data_sections, &mut vulnerability_notes);
 
     Gadget::new(
         address,

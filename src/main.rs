@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for instructions in &all_instructions {
         let raw_gadgets = find_gadgets(instructions, effective_max_size);
         for gadget in raw_gadgets {
-            analyzed_gadgets.push(analyze_gadget(&gadget));
+            analyzed_gadgets.push(analyze_gadget(&gadget, &binary_info.data_sections));
         }
     }
 
@@ -124,6 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut key_confusion = 0;
     let mut modifier_confusion = 0;
     let mut unsigned_indirect = 0;
+    let mut pre_auth_load = 0;
     let mut stack_pivot = 0;
     let mut pac_safe = 0;
 
@@ -135,6 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             GadgetType::KeyConfusion => key_confusion += 1,
             GadgetType::ModifierConfusion => modifier_confusion += 1,
             GadgetType::UnsignedIndirect => unsigned_indirect += 1,
+            GadgetType::PreAuthLoad => pre_auth_load += 1,
             GadgetType::StackPivot => stack_pivot += 1,
             GadgetType::PacSafe => pac_safe += 1,
         }
@@ -169,6 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         GadgetType::KeyConfusion |
                         GadgetType::ModifierConfusion |
                         GadgetType::UnsignedIndirect |
+                        GadgetType::PreAuthLoad |
                         GadgetType::StackPivot
                     )
                 } else {
@@ -188,6 +191,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &filtered_gadgets,
             unsigned,
             unsigned_indirect,
+            pre_auth_load,
             key_confusion,
             modifier_confusion,
             replay_vuln,
@@ -222,6 +226,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     GadgetType::KeyConfusion |
                     GadgetType::ModifierConfusion |
                     GadgetType::UnsignedIndirect |
+                    GadgetType::PreAuthLoad |
                     GadgetType::StackPivot
                 )
             } else {
@@ -278,6 +283,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             analyzed_gadgets.len(),
             unsigned,
             unsigned_indirect,
+            pre_auth_load,
             key_confusion,
             modifier_confusion,
             replay_vuln,

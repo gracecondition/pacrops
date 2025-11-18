@@ -1,5 +1,36 @@
 use crate::types::{PacInstruction, GadgetType};
 
+/// Parse load address from ldr instruction operands
+/// Handles PC-relative loads: "ldr x0, [pc, #0x1000]"
+/// Returns the absolute address being loaded from
+fn parse_load_address(op_str: &str, insn_addr: u64) -> Option<u64> {
+    // Look for PC-relative loads: [pc, #offset] or [pc, offset]
+    if op_str.contains("pc") {
+        // Extract offset from something like "x0, [pc, #0x1000]"
+        let parts: Vec<&str> = op_str.split(',').collect();
+        if parts.len() >= 3 {
+            let offset_str = parts[2].trim().trim_end_matches(']');
+            let offset_str = offset_str.trim_start_matches('#');
+
+            // Parse hex or decimal
+            let offset = if offset_str.starts_with("0x") {
+                i64::from_str_radix(offset_str.trim_start_matches("0x"), 16).ok()?
+            } else {
+                offset_str.parse::<i64>().ok()?
+            };
+
+            // PC-relative addressing: PC + offset
+            // On ARM64, PC points to current instruction
+            Some((insn_addr as i64 + offset) as u64)
+        } else {
+            None
+        }
+    } else {
+        // For non-PC relative loads, we can't determine the address statically
+        None
+    }
+}
+
 pub fn detect_pac_instruction(mnemonic: &str) -> Option<PacInstruction> {
     match mnemonic {
         // Sign instructions
@@ -20,9 +51,21 @@ pub fn detect_pac_instruction(mnemonic: &str) -> Option<PacInstruction> {
         "autibz" => Some(PacInstruction::AutIBZ),
         "autib" => Some(PacInstruction::AutIB),
         "autdb" => Some(PacInstruction::AutDB),
-        // Combined operations
+        // Combined operations: auth + return
         "retaa" => Some(PacInstruction::RetAA),
         "retab" => Some(PacInstruction::RetAB),
+        "eretaa" => Some(PacInstruction::RetAA),  // Exception return with A key
+        "eretab" => Some(PacInstruction::RetAB),  // Exception return with B key
+        // Combined operations: auth + branch (register modifier)
+        "braa" => Some(PacInstruction::AutIA),    // Branch with A key auth, register modifier
+        "brab" => Some(PacInstruction::AutIB),    // Branch with B key auth, register modifier
+        "blraa" => Some(PacInstruction::AutIA),   // Branch-link with A key auth, register modifier
+        "blrab" => Some(PacInstruction::AutIB),   // Branch-link with B key auth, register modifier
+        // Combined operations: auth + branch (zero modifier)
+        "braaz" => Some(PacInstruction::AutIAZ),  // Branch with A key auth, zero modifier
+        "brabz" => Some(PacInstruction::AutIBZ),  // Branch with B key auth, zero modifier
+        "blraaz" => Some(PacInstruction::AutIAZ), // Branch-link with A key auth, zero modifier
+        "blrabz" => Some(PacInstruction::AutIBZ), // Branch-link with B key auth, zero modifier
         _ => None,
     }
 }
@@ -30,6 +73,7 @@ pub fn detect_pac_instruction(mnemonic: &str) -> Option<PacInstruction> {
 pub fn detect_pac_vulnerabilities(
     pac_insns: &[PacInstruction],
     gadget_insns: &[(u64, String, String)],
+    data_sections: &[(u64, u64, String)],
     notes: &mut Vec<String>,
 ) -> GadgetType {
     let mut has_sign = false;
@@ -132,12 +176,44 @@ pub fn detect_pac_vulnerabilities(
         }
     }
 
-    // Check for unsigned indirect branches
-    for (_, mnemonic, _) in gadget_insns {
+    // Check for unsigned indirect branches AND pre-authenticated loads
+    let mut has_br_blr = false;
+    let mut br_blr_register = None;
+
+    for (_, mnemonic, op_str) in gadget_insns {
         if mnemonic == "br" || mnemonic == "blr" {
-            notes.push("Unsigned indirect branch - no PAC check".to_string());
-            return GadgetType::UnsignedIndirect;
+            has_br_blr = true;
+            // Extract the register being branched to (e.g., "x0" from "br x0")
+            br_blr_register = op_str.split(',').next().map(|s| s.trim().to_string());
+            break;
         }
+    }
+
+    if has_br_blr {
+        // Check if the br/blr register is loaded from a data section
+        if let Some(ref target_reg) = br_blr_register {
+            for (i, (_, mnemonic, op_str)) in gadget_insns.iter().enumerate() {
+                // Look for loads into the target register
+                if mnemonic.starts_with("ldr") && op_str.starts_with(target_reg) {
+                    // Parse the load address if it's an immediate load
+                    // Example: "ldr x0, [x1, #0x10]" or "ldr x0, [pc, #0x1000]"
+                    if let Some(load_addr) = parse_load_address(op_str, gadget_insns[i].0) {
+                        // Check if this address is in a data section
+                        for (start, end, section_name) in data_sections {
+                            if load_addr >= *start && load_addr < *end {
+                                notes.push(format!("Loads from {} (likely PAC-signed pointer)", section_name));
+                                notes.push(format!("Address: 0x{:x}", load_addr));
+                                return GadgetType::PreAuthLoad;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If no pre-auth load detected, it's just unsigned indirect
+        notes.push("Unsigned indirect branch - no PAC check".to_string());
+        return GadgetType::UnsignedIndirect;
     }
 
     // Check for stack pivot (SP manipulation before auth)

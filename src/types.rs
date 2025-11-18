@@ -37,6 +37,7 @@ pub enum GadgetType {
     KeyConfusion,       // Sign with one key, auth with another
     ModifierConfusion,  // Sign with one modifier, auth with different modifier
     UnsignedIndirect,   // br/blr without PAC on target
+    PreAuthLoad,        // Loads from data section with PAC pointers, then br/blr
     StackPivot,         // SP manipulation before auth
     PacSafe,            // Properly protected by PAC
 }

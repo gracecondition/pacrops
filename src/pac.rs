@@ -1,34 +1,123 @@
 use crate::types::{PacInstruction, GadgetType};
 
-/// Parse load address from ldr instruction operands
-/// Handles PC-relative loads: "ldr x0, [pc, #0x1000]"
-/// Returns the absolute address being loaded from
-fn parse_load_address(op_str: &str, insn_addr: u64) -> Option<u64> {
-    // Look for PC-relative loads: [pc, #offset] or [pc, offset]
-    if op_str.contains("pc") {
-        // Extract offset from something like "x0, [pc, #0x1000]"
-        let parts: Vec<&str> = op_str.split(',').collect();
-        if parts.len() >= 3 {
-            let offset_str = parts[2].trim().trim_end_matches(']');
-            let offset_str = offset_str.trim_start_matches('#');
-
-            // Parse hex or decimal
-            let offset = if offset_str.starts_with("0x") {
-                i64::from_str_radix(offset_str.trim_start_matches("0x"), 16).ok()?
-            } else {
-                offset_str.parse::<i64>().ok()?
-            };
-
-            // PC-relative addressing: PC + offset
-            // On ARM64, PC points to current instruction
-            Some((insn_addr as i64 + offset) as u64)
-        } else {
-            None
-        }
+/// Parse offset from operand string (handles #0x1000, #4096, etc.)
+fn parse_offset(offset_str: &str) -> Option<i64> {
+    let offset_str = offset_str.trim().trim_start_matches('#');
+    if offset_str.starts_with("0x") {
+        i64::from_str_radix(offset_str.trim_start_matches("0x"), 16).ok()
     } else {
-        // For non-PC relative loads, we can't determine the address statically
-        None
+        offset_str.parse::<i64>().ok()
     }
+}
+
+/// Extract register name from operand (e.g., "x0" from "x0, [x1]")
+fn extract_register(op_str: &str) -> Option<String> {
+    op_str.split(',').next().map(|s| s.trim().to_string())
+}
+
+/// Analyze gadget for loads from data sections
+/// Handles both PC-relative loads and adrp + add + ldr sequences
+fn find_data_section_loads(
+    gadget_insns: &[(u64, String, String)],
+    target_reg: &str,
+    data_sections: &[(u64, u64, String)],
+) -> Option<(u64, String)> {
+    use std::collections::HashMap;
+
+    // Track register values computed by adrp and add instructions
+    let mut reg_values: HashMap<String, u64> = HashMap::new();
+
+    for (addr, mnemonic, op_str) in gadget_insns {
+        // Track adrp instructions: adrp x0, #0x100000000
+        if mnemonic == "adrp" {
+            if let Some(dest_reg) = extract_register(op_str) {
+                // adrp computes: (PC & ~0xfff) + (imm << 12)
+                let parts: Vec<&str> = op_str.split(',').collect();
+                if parts.len() >= 2 {
+                    if let Some(imm) = parse_offset(parts[1].trim()) {
+                        let page_addr = (*addr & !0xfff) + ((imm << 12) as u64);
+                        reg_values.insert(dest_reg, page_addr);
+                    }
+                }
+            }
+        }
+
+        // Track add instructions: add x0, x0, #offset
+        if mnemonic == "add" {
+            let parts: Vec<&str> = op_str.split(',').collect();
+            if parts.len() >= 3 {
+                let dest_reg = parts[0].trim();
+                let src_reg = parts[1].trim();
+
+                // Only track if adding to itself or we already track the source
+                if let Some(&base_val) = reg_values.get(src_reg) {
+                    if let Some(offset) = parse_offset(parts[2].trim()) {
+                        reg_values.insert(dest_reg.to_string(), (base_val as i64 + offset) as u64);
+                    }
+                }
+            }
+        }
+
+        // Check for ldr into target register
+        if mnemonic.starts_with("ldr") {
+            let dest_reg_opt = extract_register(op_str);
+            if let Some(dest_reg) = dest_reg_opt {
+                // Check any ldr, not just into target_reg, because we want to find
+                // if the target_reg gets loaded from an address computed via adrp
+
+                // Case 1: PC-relative load: ldr x0, [pc, #offset]
+                if op_str.contains("pc") {
+                    let parts: Vec<&str> = op_str.split(',').collect();
+                    if parts.len() >= 3 {
+                        let offset_str = parts[2].trim().trim_end_matches(']');
+                        if let Some(offset) = parse_offset(offset_str) {
+                            let load_addr = (*addr as i64 + offset) as u64;
+
+                            // Check if in data section and loading into target
+                            if dest_reg == target_reg {
+                                for (start, end, section_name) in data_sections {
+                                    if load_addr >= *start && load_addr < *end {
+                                        return Some((load_addr, section_name.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Case 2: Load from computed address: ldr x0, [x1, #offset] or ldr x0, [x1]
+                else if op_str.contains('[') {
+                    // Parse: "x0, [x1, #0x10]" or "x0, [x1]"
+                    let parts: Vec<&str> = op_str.split('[').collect();
+                    if parts.len() >= 2 {
+                        let addr_parts: Vec<&str> = parts[1].trim_end_matches(']').split(',').collect();
+                        let base_reg = addr_parts[0].trim();
+
+                        // Check if we have a computed value for the base register
+                        if let Some(&base_addr) = reg_values.get(base_reg) {
+                            let offset = if addr_parts.len() >= 2 {
+                                parse_offset(addr_parts[1].trim()).unwrap_or(0)
+                            } else {
+                                0
+                            };
+
+                            let load_addr = (base_addr as i64 + offset) as u64;
+
+                            // Check if loading into target register from data section
+                            if dest_reg == target_reg {
+                                for (start, end, section_name) in data_sections {
+                                    if load_addr >= *start && load_addr < *end {
+                                        return Some((load_addr, section_name.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 pub fn detect_pac_instruction(mnemonic: &str) -> Option<PacInstruction> {
@@ -192,22 +281,10 @@ pub fn detect_pac_vulnerabilities(
     if has_br_blr {
         // Check if the br/blr register is loaded from a data section
         if let Some(ref target_reg) = br_blr_register {
-            for (i, (_, mnemonic, op_str)) in gadget_insns.iter().enumerate() {
-                // Look for loads into the target register
-                if mnemonic.starts_with("ldr") && op_str.starts_with(target_reg) {
-                    // Parse the load address if it's an immediate load
-                    // Example: "ldr x0, [x1, #0x10]" or "ldr x0, [pc, #0x1000]"
-                    if let Some(load_addr) = parse_load_address(op_str, gadget_insns[i].0) {
-                        // Check if this address is in a data section
-                        for (start, end, section_name) in data_sections {
-                            if load_addr >= *start && load_addr < *end {
-                                notes.push(format!("Loads from {} (likely PAC-signed pointer)", section_name));
-                                notes.push(format!("Address: 0x{:x}", load_addr));
-                                return GadgetType::PreAuthLoad;
-                            }
-                        }
-                    }
-                }
+            if let Some((load_addr, section_name)) = find_data_section_loads(gadget_insns, target_reg, data_sections) {
+                notes.push(format!("Loads from {} (likely PAC-signed pointer)", section_name));
+                notes.push(format!("Address: 0x{:x}", load_addr));
+                return GadgetType::PreAuthLoad;
             }
         }
 

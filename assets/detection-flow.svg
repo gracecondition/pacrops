@@ -218,6 +218,6 @@
 
   <!-- Footer -->
   <text x="500" y="1890" style="fill: #95a5a6; font-family: Arial; font-size: 11px; text-anchor: middle;">
-    pacrops - PAC-aware ROP Gadget Finder
+    pacrops - PAC-aware ROP Gadget Finder | https://github.com/gracecondition/pacrops
   </text>
 </svg>

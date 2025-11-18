@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg width="1000" height="1800" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg width="1000" height="2000" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
   <!-- Define styles -->
   <defs>
     <style type="text/css">
@@ -35,7 +35,7 @@
   <!-- Stage 1: Binary Input -->
   <rect x="300" y="60" width="400" height="60" class="stage-box" rx="5"/>
   <text x="500" y="85" class="header-text">ARM64 Binary Input</text>
-  <text x="320" y="105" class="small-text">• Executable sections loaded from ELF/Mach-O</text>
+  <text x="320" y="105" class="small-text">• Executable + data sections from ELF/Mach-O</text>
 
   <!-- Arrow -->
   <path d="M 500 120 L 500 150" class="arrow"/>
@@ -43,9 +43,9 @@
   <!-- Stage 2: Disassembly -->
   <rect x="250" y="150" width="500" height="80" class="stage-box" rx="5"/>
   <text x="500" y="175" class="header-text">Stage 1: Disassembly (Capstone)</text>
-  <text x="270" y="195" class="small-text">• Parse binary executable sections</text>
-  <text x="270" y="210" class="small-text">• Disassemble all ARM64 instructions</text>
-  <text x="270" y="225" class="small-text">• Extract mnemonic, operands, addresses</text>
+  <text x="270" y="195" class="small-text">• Parse executable sections</text>
+  <text x="270" y="210" class="small-text">• Disassemble ARM64 instructions</text>
+  <text x="270" y="225" class="small-text">• Parse data sections (__auth_got, __auth_ptr, __const)</text>
 
   <!-- Arrow -->
   <path d="M 500 230 L 500 260" class="arrow"/>
@@ -53,136 +53,146 @@
   <!-- Stage 3: Control Flow Detection -->
   <rect x="250" y="260" width="500" height="95" class="stage-box" rx="5"/>
   <text x="500" y="285" class="header-text">Stage 2: Find Control-Flow Instructions</text>
-  <text x="270" y="305" class="small-text">• Scan for: ret, retaa, retab, br, blr</text>
+  <text x="270" y="305" class="small-text">• Scan for: ret, retaa, retab, br, blr, braa, blraa</text>
   <text x="270" y="320" class="small-text">• Each marks a potential gadget endpoint</text>
-  <text x="270" y="335" class="small-text">• Source: src/gadget.rs:4-6</text>
+  <text x="270" y="335" class="small-text">• Source: src/gadget.rs:4-15</text>
   <text x="270" y="350" class="small-text">  is_control_flow_instruction()</text>
 
   <!-- Arrow -->
   <path d="M 500 355 L 500 385" class="arrow"/>
 
   <!-- Stage 4: Gadget Extraction -->
-  <rect x="250" y="385" width="500" height="110" class="stage-box" rx="5"/>
+  <rect x="250" y="385" width="500" height="95" class="stage-box" rx="5"/>
   <text x="500" y="410" class="header-text">Stage 3: Extract Gadgets</text>
   <text x="270" y="430" class="small-text">• For each control-flow instruction at position i:</text>
   <text x="270" y="445" class="small-text">  - Look backwards up to max_gadget_size (default: 10)</text>
-  <text x="270" y="460" class="small-text">  - Create gadgets: [insn[i]], [insn[i-1], insn[i]], ...</text>
-  <text x="270" y="475" class="small-text">  - Up to 10-instruction sequences per endpoint</text>
-  <text x="270" y="490" class="small-text">• Source: src/gadget.rs:8-30</text>
+  <text x="270" y="460" class="small-text">  - Create gadget sequences ending at that instruction</text>
+  <text x="270" y="475" class="small-text">• Source: src/gadget.rs:17-39</text>
 
   <!-- Arrow -->
-  <path d="M 500 495 L 500 525" class="arrow"/>
+  <path d="M 500 480 L 500 510" class="arrow"/>
 
   <!-- Stage 5: PAC Instruction Identification -->
-  <rect x="250" y="525" width="500" height="110" class="stage-box" rx="5"/>
-  <text x="500" y="550" class="header-text">Stage 4: Identify PAC Instructions</text>
-  <text x="270" y="570" class="small-text">• Scan each gadget for PAC mnemonics:</text>
-  <text x="270" y="585" class="small-text">  - Sign: paciasp, paciaz, pacia, pacibsp, pacibz, pacib</text>
-  <text x="270" y="600" class="small-text">  - Auth: autiasp, autiaz, autia, autibsp, autibz, autib</text>
-  <text x="270" y="615" class="small-text">  - Combined: retaa, retab</text>
-  <text x="270" y="630" class="small-text">• Track keys (A/B) and modifiers (SP/zero/register)</text>
+  <rect x="250" y="510" width="500" height="110" class="stage-box" rx="5"/>
+  <text x="500" y="535" class="header-text">Stage 4: Identify PAC Instructions</text>
+  <text x="270" y="555" class="small-text">• Scan each gadget for PAC mnemonics:</text>
+  <text x="270" y="570" class="small-text">  - Sign: paciasp, paciaz, pacia, pacibsp, pacibz, pacib</text>
+  <text x="270" y="585" class="small-text">  - Auth: autiasp, autiaz, autia, retaa, retab, braa, blraa</text>
+  <text x="270" y="600" class="small-text">• Track keys (A/B) and modifiers (SP/zero/register)</text>
+  <text x="270" y="615" class="small-text">• Source: src/pac.rs:129-166</text>
 
   <!-- Arrow -->
-  <path d="M 500 635 L 500 665" class="arrow"/>
+  <path d="M 500 620 L 500 650" class="arrow"/>
 
   <!-- Stage 6: Vulnerability Classification Header -->
-  <rect x="200" y="665" width="600" height="40" class="decision-box" rx="5"/>
-  <text x="500" y="690" class="header-text">Stage 5: Vulnerability Classification (Priority Order)</text>
+  <rect x="200" y="650" width="600" height="40" class="decision-box" rx="5"/>
+  <text x="500" y="675" class="header-text">Stage 5: Vulnerability Classification (Priority Order)</text>
 
   <!-- Arrow -->
-  <path d="M 500 705 L 500 730" class="arrow"/>
+  <path d="M 500 690 L 500 715" class="arrow"/>
 
-  <!-- Decision 1: UNSIGNED-BR -->
-  <rect x="300" y="730" width="400" height="60" class="critical-box" rx="5"/>
-  <text x="500" y="750" class="decision-text">1. Contains br/blr?</text>
-  <text x="320" y="770" class="small-text">Unsigned indirect branch - no PAC authentication</text>
-  <text x="320" y="785" class="small-text">→ UNSIGNED-BR [CRITICAL]</text>
+  <!-- Decision 1: PRE-AUTH LOAD -->
+  <rect x="250" y="715" width="500" height="75" class="critical-box" rx="5"/>
+  <text x="500" y="735" class="decision-text">1. Loads from data section before br/blr/braa?</text>
+  <text x="270" y="755" class="small-text">Tracks adrp+add+ldr chains to detect loads from</text>
+  <text x="270" y="770" class="small-text">__auth_got, __auth_ptr, __const (pre-signed pointers)</text>
+  <text x="270" y="785" class="small-text">→ PRE-AUTH LOAD [CRITICAL] - Bypasses PAC entirely</text>
 
   <!-- Arrow down (No) -->
   <path d="M 500 790 L 500 820" class="arrow-no"/>
   <text x="510" y="810" class="label-text">No</text>
 
-  <!-- Decision 2: STACK-PIVOT -->
-  <rect x="300" y="820" width="400" height="60" class="critical-box" rx="5"/>
-  <text x="500" y="840" class="decision-text">2. Modifies SP before autiasp/autibsp?</text>
-  <text x="320" y="860" class="small-text">Stack pointer changed before authentication</text>
-  <text x="320" y="875" class="small-text">→ STACK-PIVOT [CRITICAL]</text>
+  <!-- Decision 2: UNSIGNED-BR -->
+  <rect x="250" y="820" width="500" height="60" class="critical-box" rx="5"/>
+  <text x="500" y="840" class="decision-text">2. Contains unsigned br/blr?</text>
+  <text x="270" y="860" class="small-text">Indirect branch without PAC authentication</text>
+  <text x="270" y="875" class="small-text">→ UNSIGNED-INDIRECT [CRITICAL]</text>
 
   <!-- Arrow down (No) -->
   <path d="M 500 880 L 500 910" class="arrow-no"/>
   <text x="510" y="900" class="label-text">No</text>
 
-  <!-- Decision 3: KEY-CONFUSION -->
-  <rect x="300" y="910" width="400" height="60" class="critical-box" rx="5"/>
-  <text x="500" y="930" class="decision-text">3. Sign with A key, auth with B? (or vice versa)</text>
-  <text x="320" y="950" class="small-text">PAC key mismatch between sign and auth</text>
-  <text x="320" y="965" class="small-text">→ KEY-CONFUSION [CRITICAL]</text>
+  <!-- Decision 3: STACK-PIVOT -->
+  <rect x="250" y="910" width="500" height="60" class="critical-box" rx="5"/>
+  <text x="500" y="930" class="decision-text">3. Modifies SP before autiasp/autibsp?</text>
+  <text x="270" y="950" class="small-text">Stack pointer changed before authentication</text>
+  <text x="270" y="965" class="small-text">→ STACK-PIVOT [CRITICAL]</text>
 
   <!-- Arrow down (No) -->
   <path d="M 500 970 L 500 1000" class="arrow-no"/>
   <text x="510" y="990" class="label-text">No</text>
 
-  <!-- Decision 4: MODIFIER-CONFUSION -->
-  <rect x="300" y="1000" width="400" height="60" class="high-box" rx="5"/>
-  <text x="500" y="1020" class="decision-text">4. Sign with SP, auth with zero? (or vice versa)</text>
-  <text x="320" y="1040" class="small-text">PAC modifier mismatch between sign and auth</text>
-  <text x="320" y="1055" class="small-text">→ MODIFIER-CONFUSION [HIGH]</text>
+  <!-- Decision 4: KEY-CONFUSION -->
+  <rect x="250" y="1000" width="500" height="60" class="critical-box" rx="5"/>
+  <text x="500" y="1020" class="decision-text">4. Sign with A key, auth with B? (or vice versa)</text>
+  <text x="270" y="1040" class="small-text">PAC key mismatch between sign and auth</text>
+  <text x="270" y="1055" class="small-text">→ KEY-CONFUSION [CRITICAL]</text>
 
   <!-- Arrow down (No) -->
   <path d="M 500 1060 L 500 1090" class="arrow-no"/>
   <text x="510" y="1080" class="label-text">No</text>
 
-  <!-- Decision 5: CONTEXT-MANIPULATION -->
-  <rect x="300" y="1090" width="400" height="60" class="medium-box" rx="5"/>
-  <text x="500" y="1110" class="decision-text">5. Modifies x30/lr register?</text>
-  <text x="320" y="1130" class="small-text">Loads return address from memory before auth</text>
-  <text x="320" y="1145" class="small-text">→ CONTEXT-MANIPULATION [MEDIUM]</text>
+  <!-- Decision 5: MODIFIER-CONFUSION -->
+  <rect x="250" y="1090" width="500" height="60" class="high-box" rx="5"/>
+  <text x="500" y="1110" class="decision-text">5. Sign with SP, auth with zero? (or vice versa)</text>
+  <text x="270" y="1130" class="small-text">PAC modifier mismatch between sign and auth</text>
+  <text x="270" y="1145" class="small-text">→ MODIFIER-CONFUSION [HIGH]</text>
 
   <!-- Arrow down (No) -->
   <path d="M 500 1150 L 500 1180" class="arrow-no"/>
   <text x="510" y="1170" class="label-text">No</text>
 
-  <!-- Decision 6: REPLAY-VULNERABLE -->
-  <rect x="300" y="1180" width="400" height="60" class="high-box" rx="5"/>
-  <text x="500" y="1200" class="decision-text">6. Uses zero modifier (paciaz/pacibz)?</text>
-  <text x="320" y="1220" class="small-text">Predictable PAC values - replay attacks possible</text>
-  <text x="320" y="1235" class="small-text">→ REPLAY-VULNERABLE [HIGH]</text>
+  <!-- Decision 6: CONTEXT-MANIPULATION -->
+  <rect x="250" y="1180" width="500" height="60" class="medium-box" rx="5"/>
+  <text x="500" y="1200" class="decision-text">6. Modifies x30/lr register?</text>
+  <text x="270" y="1220" class="small-text">Loads return address from memory before auth</text>
+  <text x="270" y="1235" class="small-text">→ CONTEXT-MANIPULATION [MEDIUM]</text>
 
   <!-- Arrow down (No) -->
   <path d="M 500 1240 L 500 1270" class="arrow-no"/>
   <text x="510" y="1260" class="label-text">No</text>
 
-  <!-- Decision 7: Final Classification -->
-  <rect x="220" y="1270" width="560" height="80" rx="5" style="fill: #34495e; stroke: #2c3e50; stroke-width: 2;"/>
-  <text x="500" y="1295" class="decision-text">7. Final Classification</text>
+  <!-- Decision 7: REPLAY-VULNERABLE -->
+  <rect x="250" y="1270" width="500" height="60" class="high-box" rx="5"/>
+  <text x="500" y="1290" class="decision-text">7. Uses zero modifier (paciaz/pacibz)?</text>
+  <text x="270" y="1310" class="small-text">Predictable PAC values - replay attacks possible</text>
+  <text x="270" y="1325" class="small-text">→ REPLAY-VULNERABLE [HIGH]</text>
+
+  <!-- Arrow down (No) -->
+  <path d="M 500 1330 L 500 1360" class="arrow-no"/>
+  <text x="510" y="1350" class="label-text">No</text>
+
+  <!-- Decision 8: Final Classification -->
+  <rect x="220" y="1360" width="560" height="80" rx="5" style="fill: #34495e; stroke: #2c3e50; stroke-width: 2;"/>
+  <text x="500" y="1385" class="decision-text">8. Final Classification</text>
 
   <!-- Split into two outcomes -->
   <g>
-    <rect x="250" y="1310" width="220" height="35" class="safe-box" rx="3"/>
-    <text x="360" y="1332" class="small-text" style="text-anchor: middle;">Has PAC sign/auth?</text>
-    <text x="360" y="1345" class="small-text" style="text-anchor: middle; font-weight: bold;">→ PAC-SAFE</text>
+    <rect x="250" y="1400" width="220" height="35" class="safe-box" rx="3"/>
+    <text x="360" y="1422" class="small-text" style="text-anchor: middle;">Has PAC sign/auth?</text>
+    <text x="360" y="1435" class="small-text" style="text-anchor: middle; font-weight: bold;">→ PAC-SAFE</text>
   </g>
 
   <g>
-    <rect x="530" y="1310" width="220" height="35" class="critical-box" rx="3"/>
-    <text x="640" y="1332" class="small-text" style="text-anchor: middle;">No PAC instructions?</text>
-    <text x="640" y="1345" class="small-text" style="text-anchor: middle; font-weight: bold;">→ UNSIGNED [CRITICAL]</text>
+    <rect x="530" y="1400" width="220" height="35" class="critical-box" rx="3"/>
+    <text x="640" y="1422" class="small-text" style="text-anchor: middle;">No PAC instructions?</text>
+    <text x="640" y="1435" class="small-text" style="text-anchor: middle; font-weight: bold;">→ UNSIGNED [CRITICAL]</text>
   </g>
 
   <!-- Arrows to output -->
-  <path d="M 360 1345 L 360 1380 L 500 1380" class="arrow"/>
-  <path d="M 640 1345 L 640 1380 L 500 1380" class="arrow"/>
+  <path d="M 360 1435 L 360 1470 L 500 1470" class="arrow"/>
+  <path d="M 640 1435 L 640 1470 L 500 1470" class="arrow"/>
 
   <!-- Stage 7: Output -->
-  <rect x="250" y="1400" width="500" height="95" class="stage-box" rx="5"/>
-  <text x="500" y="1425" class="header-text">Stage 6: Output Generation</text>
-  <text x="270" y="1445" class="small-text">• Group gadgets by vulnerability type</text>
-  <text x="270" y="1460" class="small-text">• Generate statistics (total, exploitable count)</text>
-  <text x="270" y="1475" class="small-text">• Format output (text or JSON)</text>
-  <text x="270" y="1490" class="small-text">• Highlight critical vulnerabilities</text>
+  <rect x="250" y="1490" width="500" height="95" class="stage-box" rx="5"/>
+  <text x="500" y="1515" class="header-text">Stage 6: Output Generation</text>
+  <text x="270" y="1535" class="small-text">• Group gadgets by vulnerability type</text>
+  <text x="270" y="1550" class="small-text">• Generate statistics (total, exploitable count)</text>
+  <text x="270" y="1565" class="small-text">• Format output (text or JSON)</text>
+  <text x="270" y="1580" class="small-text">• Highlight critical vulnerabilities</text>
 
   <!-- Legend -->
-  <g transform="translate(50, 1550)">
+  <g transform="translate(50, 1640)">
     <text x="0" y="0" style="fill: #2c3e50; font-family: Arial; font-size: 16px; font-weight: bold;">Legend:</text>
 
     <rect x="0" y="10" width="30" height="20" class="critical-box" rx="2"/>
@@ -202,12 +212,12 @@
   </g>
 
   <!-- Source reference -->
-  <text x="500" y="1750" style="fill: #7f8c8d; font-family: Arial; font-size: 12px; text-anchor: middle; font-style: italic;">
-    Source: src/pac.rs:30-203 (detect_pac_vulnerabilities), src/gadget.rs:8-57
+  <text x="500" y="1860" style="fill: #7f8c8d; font-family: Arial; font-size: 12px; text-anchor: middle; font-style: italic;">
+    Source: src/pac.rs:168-383 (detect_pac_vulnerabilities), src/gadget.rs:41-66
   </text>
 
   <!-- Footer -->
-  <text x="500" y="1780" style="fill: #95a5a6; font-family: Arial; font-size: 11px; text-anchor: middle;">
-    pacrops - PAC-aware ROP Gadget Finder | github.com/yourusername/pacrops
+  <text x="500" y="1890" style="fill: #95a5a6; font-family: Arial; font-size: 11px; text-anchor: middle;">
+    pacrops - PAC-aware ROP Gadget Finder
   </text>
 </svg>

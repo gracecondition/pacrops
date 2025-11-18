@@ -120,8 +120,8 @@ print(f"Found {p.pac_count} PAC instructions")
 print(f"Found {len(p.exploitable_gadgets())} exploitable gadgets")
 
 # Find specific gadgets
-unsigned = p.find(gadget_type=GadgetType.UNSIGNED)
-preauth = p.find(gadget_type=GadgetType.PRE_AUTH_LOAD)
+unsigned = p.unsigned_gadgets()
+preauth = p.preauth_load_gadgets()
 pop_x0 = p.pop_register('x0')
 
 # Search patterns

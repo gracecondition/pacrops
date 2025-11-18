@@ -62,9 +62,12 @@ class Pacropper:
         p = Pacropper('./target/binary')
 
         # Get all unsigned gadgets
-        unsigned = p.find(gadget_type=GadgetType.UNSIGNED)
+        unsigned = p.unsigned_gadgets()
         for gadget in unsigned:
             print(f"{hex(gadget.address)}: {' ; '.join(gadget.instructions)}")
+
+        # Get Pre-Auth Load gadgets (loads pre-signed pointers)
+        preauth = p.preauth_load_gadgets()
 
         # Search for specific instruction patterns
         pop_gadgets = p.search(r'ldr x0.*ret')
@@ -227,6 +230,10 @@ class Pacropper:
     def unsigned_gadgets(self) -> List[Gadget]:
         """Find all gadgets without PAC protection"""
         return self.find(gadget_type=GadgetType.UNSIGNED)
+
+    def preauth_load_gadgets(self) -> List[Gadget]:
+        """Find all Pre-Auth Load gadgets (loads pre-signed pointers from data sections)"""
+        return self.find(gadget_type=GadgetType.PRE_AUTH_LOAD)
 
     def exploitable_gadgets(self) -> List[Gadget]:
         """Find all exploitable gadgets (excludes PAC-safe)"""

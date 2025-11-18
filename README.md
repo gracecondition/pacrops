@@ -226,43 +226,180 @@ make
 python3 exploit_clean.py
 ```
 
-## How It Works
+## How the Detection Engine Works
 
-pacrops analyzes ARM64 binaries by:
+pacrops uses a multi-stage analysis pipeline to identify exploitable ROP gadgets in PAC-protected ARM64 binaries. Understanding this process is crucial for security researchers analyzing PAC implementations.
 
-1. **Disassembly**: Uses Capstone to disassemble executable sections
-2. **PAC Detection**: Identifies PAC instructions (PACIA*, RETAA, etc.)
-3. **Gadget Discovery**: Finds all gadgets ending in control-flow instructions
-4. **Vulnerability Analysis**: Classifies each gadget based on:
-   - Presence/absence of PAC instructions
-   - PAC key usage (A vs B)
-   - PAC modifier usage (SP vs zero vs register)
-   - Context manipulation opportunities
-   - Stack pivot potential
+### Detection Flow Diagram
 
-### Detection Logic
+<div align="center">
+<img src="assets/detection-flow.svg" alt="PAC Detection Flow Diagram" width="100%">
+</div>
 
-**Gadget Discovery Process:**
-1. Disassemble all executable sections using Capstone
-2. Find all control-flow instructions: `ret`, `retaa`, `retab`, `br`, `blr`
-3. Look backwards up to max_gadget_size (default: 10) instructions
-4. Collect all instruction sequences ending at each control-flow instruction
-5. Analyze each gadget for PAC instructions and vulnerability patterns
+The detection engine follows a 6-stage pipeline with priority-based vulnerability classification. Each gadget is analyzed through all stages, with vulnerability checks performed in strict priority order to ensure accurate classification.
 
-**Vulnerability Classification (in priority order):**
+### Core Detection Algorithm
 
-| Type | Detection Logic |
-|------|-----------------|
-| **UNSIGNED-BR** | Contains `br` or `blr` instruction without PAC authentication (checked first) |
-| **STACK-PIVOT** | Modifies `sp` register (mov/add/sub/ldr sp) before `autiasp`/`autibsp` instruction |
-| **KEY-CONFUSION** | Signs with A key (`pacia*`) but authenticates with B key (`retab`/`autib*`), or vice versa |
-| **MODIFIER-CONFUSION** | Signs with SP modifier (`paciasp`) but authenticates with zero (`autiaz`), or vice versa |
-| **CONTEXT-VULN** | Contains `ldr`/`mov`/`add`/`sub` that modifies `x30` or `lr` register (loads return address from memory) |
-| **REPLAY-VULN** | Uses zero modifier PAC instructions: `paciaz`, `pacibz`, `autiaz`, `autibz` (predictable PAC values) |
-| **PAC-SAFE** | Contains PAC sign or auth instructions with proper key/modifier matching |
-| **UNSIGNED** | No PAC instructions found at all - plain `ret` with no protection |
+The vulnerability detection engine (`detect_pac_vulnerabilities` in `src/pac.rs:30-203`) implements a sophisticated analysis that examines both PAC instruction usage and instruction patterns:
 
-**Note:** Detection proceeds in order - first match wins. For example, a gadget with `br` is immediately classified as UNSIGNED-BR before checking other patterns.
+#### 1. **PAC Instruction Analysis**
+
+For each PAC instruction found in the gadget, the engine tracks:
+- **Key usage**: Whether A or B key is used for signing/authentication
+- **Modifier type**: Whether SP, zero, or register modifier is used
+- **Operation type**: Whether it's signing or authentication
+
+```rust
+// Example: Analyzing paciasp instruction
+PacInstruction::PacIASP => {
+    has_sign = true;              // This gadget signs pointers
+    uses_a_key_sign = true;       // Uses A key for signing
+    uses_sp_modifier_sign = true; // Uses SP as modifier
+}
+```
+
+#### 2. **Unsigned Indirect Branch Detection** (Priority 1)
+
+Immediately checked before other analyses. Any gadget containing `br` or `blr` without PAC authentication is flagged as critically vulnerable:
+
+```rust
+for (_, mnemonic, _) in gadget_insns {
+    if mnemonic == "br" || mnemonic == "blr" {
+        return GadgetType::UnsignedIndirect;  // Exit immediately
+    }
+}
+```
+
+**Why it's critical:** `br`/`blr` instructions perform indirect jumps to addresses in registers. Without PAC authentication, an attacker can control these registers to jump anywhere.
+
+#### 3. **Stack Pivot Detection** (Priority 2)
+
+Detects gadgets that modify the stack pointer (`sp`) before a PAC authentication instruction:
+
+```rust
+if (mnemonic.starts_with("mov") || mnemonic.starts_with("add") ||
+    mnemonic.starts_with("sub") || mnemonic.starts_with("ldr")) &&
+   op_str.contains("sp") {
+    // Check if autiasp/autibsp comes after this
+    for (_, later_mnem, _) in &gadget_insns[i+1..] {
+        if later_mnem == "autiasp" || later_mnem == "autibsp" {
+            return GadgetType::StackPivot;
+        }
+    }
+}
+```
+
+**Why it's critical:** PAC uses SP as a context modifier. If SP is changed before authentication, the PAC check will fail or can be bypassed by controlling the new SP value.
+
+#### 4. **Key Confusion Detection** (Priority 3)
+
+Identifies mismatches between signing and authentication keys:
+
+```rust
+if (uses_a_key_sign && uses_b_key_auth) || (uses_b_key_sign && uses_a_key_auth) {
+    return GadgetType::KeyConfusion;
+}
+```
+
+**Why it's critical:** PAC requires the same key for signing and authentication. Using different keys causes authentication to always fail, which may allow an attacker to use any pointer value.
+
+#### 5. **Modifier Confusion Detection** (Priority 4)
+
+Detects mismatches between signing and authentication modifiers:
+
+```rust
+if (uses_sp_modifier_sign && uses_zero_modifier_auth) ||
+   (uses_zero_modifier_sign && uses_sp_modifier_auth) {
+    return GadgetType::ModifierConfusion;
+}
+```
+
+**Why it's exploitable:** Different modifiers produce different PAC values. This mismatch can be exploited with additional primitives like memory leaks.
+
+#### 6. **Context Manipulation Detection** (Priority 5)
+
+Identifies gadgets that load or modify the link register (x30/lr) from memory before authentication:
+
+```rust
+if (mnemonic.starts_with("mov") || mnemonic.starts_with("add") ||
+    mnemonic.starts_with("sub") || mnemonic.starts_with("ldr")) &&
+   (op_str.contains("x30") || op_str.contains("lr")) {
+    modifies_context = true;
+}
+```
+
+**Why it matters:** While the gadget may use PAC, loading LR from memory means an attacker can potentially supply a pre-authenticated pointer if they have a memory leak or PAC oracle.
+
+#### 7. **Replay Vulnerability Detection** (Priority 6)
+
+Detects use of zero-modifier PAC instructions:
+
+```rust
+PacInstruction::PacIAZ | PacInstruction::PacIBZ |
+PacInstruction::AutIAZ | PacInstruction::AutIBZ => {
+    uses_zero_modifier = true;
+}
+```
+
+**Why it's exploitable:** Zero modifiers produce predictable PAC values that can potentially be reused across different contexts, enabling replay attacks.
+
+#### 8. **Final Classification**
+
+If none of the above vulnerabilities are detected:
+- **PAC-Safe**: Gadget has proper PAC signing/authentication with matching keys and modifiers
+- **Unsigned**: Gadget has no PAC instructions at all (plain `ret`)
+
+### Key Implementation Details
+
+**Priority-Based Detection** (`src/pac.rs:136-202`):
+The detection logic uses early returns to enforce priority ordering. Once a vulnerability class is detected, the function returns immediately without checking lower-priority classes.
+
+**Source Code References:**
+- PAC instruction detection: `src/pac.rs:3-28`
+- Vulnerability classification: `src/pac.rs:30-203`
+- Gadget discovery: `src/gadget.rs:8-30`
+- Gadget analysis orchestration: `src/gadget.rs:32-57`
+
+### Example: Detecting an Unsigned Gadget
+
+Consider this instruction sequence:
+```
+0x100000540: ldr x0, [sp], #16
+0x100000544: ldr x1, [sp], #16
+0x100000548: ret
+```
+
+**Analysis flow:**
+1. **Stage 2**: `ret` identified as control-flow instruction
+2. **Stage 3**: Extract 3-instruction gadget
+3. **Stage 4**: Scan for PAC instructions → None found
+4. **Stage 5**:
+   - Check for `br`/`blr` → No
+   - Check for stack pivot → No
+   - Check for key confusion → No PAC instructions
+   - Check for modifier confusion → No PAC instructions
+   - Check for context manipulation → No
+   - Check for replay vulnerability → No PAC instructions
+   - Check for PAC instructions → None
+   - **Result: UNSIGNED** (no PAC protection)
+
+### Example: Detecting Key Confusion
+
+Consider this instruction sequence:
+```
+0x100000560: paciasp     ; Sign with A key, SP modifier
+0x100000564: nop
+0x100000568: autibsp     ; Auth with B key, SP modifier
+0x10000056c: retab       ; Return with B key auth
+```
+
+**Analysis flow:**
+1. **Stage 4**: Detect `paciasp` (A key sign), `autibsp` (B key auth), `retab` (B key auth)
+2. **Stage 5**:
+   - Check for `br`/`blr` → No
+   - Check for stack pivot → No
+   - **Check for key confusion** → Yes! (uses_a_key_sign=true, uses_b_key_auth=true)
+   - **Result: KEY-CONFUSION** (critical vulnerability)
 
 ## Research & Background
 
